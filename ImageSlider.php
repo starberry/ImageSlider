@@ -28,7 +28,9 @@ abstract class ImageSlider {
     /*abstract*/ protected $iosslider_js_uri;  // eg. '/templates/foo/js/vendor/jquery.iosslider.min.js'
     /*abstract*/ protected $iosslider_css_uri; // eg. '/templates/foo/css/iosslider.css'
 
-    protected $responsive_selector;
+    protected $responsive_selector; // Deprecated
+    protected $responsive_slides;
+    protected $responsive_container;
     protected $large_thumb_max = 8;
     protected $div_classes = 'details';
     protected $slider_class = 'slider';
@@ -38,6 +40,7 @@ abstract class ImageSlider {
     protected $full_class = 'fullsize';
     protected $prev_label = FALSE;
     protected $next_label = FALSE;
+    protected $full_label = FALSE;
     protected $div_id;                         // If empty, a unique ID is generated.
 
     ////////////////////////////////////////////////////////////////////////////
@@ -54,7 +57,7 @@ abstract class ImageSlider {
 
     protected $buf;             // Output buffer
 
-    protected function getId()
+    public function getId()
     {
         // This generates a unique ID if there isn't already one.
         if(empty($this->div_id))
@@ -82,12 +85,20 @@ abstract class ImageSlider {
             'autoSlide:true'
         );
 
-        if(empty($this->responsive_selector)) {
+        if(isset($this->responsive_selector)) {
+            error_log("ImageSlider::responsive_selector is deprecated. ".__FILE__);
+            if($this->responsive_selector) {
+                $this->responsive_container = true;
+                $this->responsive_slides = true;
+            }
+        }
+
+        if(!$this->responsive_container and !$this->responsive_slides) {
             $confOpts[] = "responsiveSlides:false";
         }
         else {
-            $confOpts[] = "responsiveSlides:true";
-            $confOpts[] = "responsiveSlideContainer:obj.closest('".$this->responsive_selector."')";
+            $confOpts[] = "responsiveSlides:".($this->responsive_slides ? 'true':'false');
+            $confOpts[] = "responsiveSlideContainer:".($this->responsive_container ? 'true':'false');
         }
 
         $confOpts[] = "navSlideSelector:$('$navSlideSelector')";
@@ -111,7 +122,7 @@ abstract class ImageSlider {
     $(a.currentSlideObject).addClass('current');
   };
   $(function () {
-    obj.iosSlider($confOpts);
+    obj.iosSlider($confOpts).addClass('loaded');
     if($('html').hasClass('lt-ie9')) { // I H8 IE8
        $('a.slide', obj).each(function () {
          var self = $(this);
@@ -119,9 +130,27 @@ abstract class ImageSlider {
          self.removeAttr('href')
              .bind('click', function () { window.location.href = href; return false; });
        });
-    }});
-}(jQuery));
-</script>";
+    }";
+
+        if(FALSE !== $this->full_label) {
+            $this->buf[] = "
+    var body = $('body');
+    var toggle = function() {
+      body.toggleClass('fullsize');
+      obj.iosSlider(body.hasClass('fullsize') ? 'autoSlidePause' : 'autoSlidePlay');
+      return false;
+    };
+    $('#${id}_full').click(toggle);
+    $('.slider',obj).click(function() {
+      if(body.hasClass('fullsize')) {
+        toggle();
+        return false;
+      }
+    });";
+        }
+
+        $this->buf[] = "});";
+        $this->buf[] = "}(jQuery));\n</script>";
     }
 
     protected function addCSS()
@@ -169,7 +198,7 @@ abstract class ImageSlider {
 
         // If there's any HTML to overlay, add it
         if(!is_null($overlayHTML))
-            $slide[] = $overlayHTML;
+            $slide[] = '  '.$overlayHTML;
 
         // And close the wrapper
         if(is_null($clickURI))
@@ -193,7 +222,7 @@ abstract class ImageSlider {
         if(!is_null($alt))
             $attrs[] = 'alt="'.htmlspecialchars($alt).'"';
 
-        return join(' ', $attrs).'>';
+        return join(' ', $attrs).' />';
     }
 
     public function html($sep="\n")
@@ -303,14 +332,23 @@ abstract class ImageSlider {
                 $this->buf[] = '<a id="'.$this->getId().'_next" href="#" class="ImageSliderNext ImageSliderPrevNext">'.$this->next_label.'</a>';
             }
 
+            if(FALSE !== $this->full_label) {
+                $this->buf[] = '<a id="'.$this->getId().'_full" href="#" class="ImageSliderFull">'.$this->full_label.'</a>';
+            }
+
             $this->buf[] = '</div>'; // end wrapper
         }
         else if($actualCount == 1) {
-            $this->buf[] = '<div id="'.$this->getId().'" class="ImageSlider ImageSliderSlideshow slideshow '.$this->div_classes.' startekSlider">';
+            $this->buf[] = '<div id="'.$this->div_id.'" class="'.$this->div_classes.'">';
             $this->buf[] = '<div class="'.$this->slider_class.'">';
             $this->buf   = array_merge($this->buf, $slides);
             $this->buf[] = '</div>'; // end slider
             $this->buf[] = '</div>'; // end Slideshow
+
+            if(FALSE !== $this->full_label) {
+                $this->buf[] = '<a id="'.$this->getId().'_full" href="#" class="ImageSliderFull">'.$this->full_label.'</a>';
+            }
+
             $this->buf[] = '</div>'; // end wrapper
         }
         else {
