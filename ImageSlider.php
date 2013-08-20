@@ -6,7 +6,7 @@
 # Tom Gidden <gid@starberry.tv>
 # April 2013
 
-namespace Starberry\ImageSlider;
+namespace Starberry;
 
 abstract class ImageSlider {
 
