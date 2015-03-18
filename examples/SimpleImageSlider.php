@@ -71,12 +71,14 @@ class SimpleImageSlider extends \Starberry\ImageSlider
 
     // This needs to resolve correctly to the Javascript for iosSlider. It
     // should ideally be on the GGFX CDN.
-    public $iosslider_js_uri = '../js/jquery.iosslider.js';
+    public $slider_js_uri = '../js/jquery.iosslider.js';
 
     // The CSS for the slider, which should include
     // ImageSlider.less. However, it's better to have this as part of the
     // main site CSS and to set this to NULL.
-    public $iosslider_css_uri = NULL;
+    public $slider_css_uri = NULL;
+
+    protected $slider_type = 'iosslider';
 
     // DOM classes to add to the slider so it can be custom-styled.
     public $div_classes = 'slideshow simple';

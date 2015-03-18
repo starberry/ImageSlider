@@ -13,8 +13,9 @@ class DetailsImageSlider extends \Starberry\ImageSlider
     protected function getFullURI($img)  { return $img->getUrl('x'); }
 
     protected $no_image_uri = '/ggfx_image/foo/s/1/no-image-2.svg';
-    protected $iosslider_js_uri = '/templates/foo/js/vendor/jquery.iosslider.js';
-    protected $iosslider_css_uri = '/templates/foo/css/iosslider.css';
+    protected $slider_js_uri = '/templates/foo/js/vendor/jquery.iosslider.js';
+    protected $slider_css_uri = '/templates/foo/css/iosslider.css';
+    protected $slider_type = 'iosslider';
 }
 
 // Prepare images 

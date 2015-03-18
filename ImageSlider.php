@@ -25,8 +25,12 @@ abstract class ImageSlider {
     /*abstract*/ protected $no_image_uri;      // eg. '/ggfx_image/foo/s/1/no-image-2.svg'
 
     # May be NULL, if dealt with elsewhere:
-    /*abstract*/ protected $iosslider_js_uri;  // eg. '/templates/foo/js/vendor/jquery.iosslider.min.js'
-    /*abstract*/ protected $iosslider_css_uri; // eg. '/templates/foo/css/iosslider.css'
+    /*abstract*/ protected $slider_js_uri;  // eg. '/templates/foo/js/vendor/jquery.iosslider.min.js'
+    /*abstract*/ protected $slider_css_uri; // eg. '/templates/foo/css/iosslider.css'
+    /*abstract*/ protected $slider_type;    // either 'iosslider' or 'swiper'
+
+    /*abstract*/ protected $iosslider_js_uri;     // Deprecated
+    /*abstract*/ protected $iosslider_css_uri;    // Deprecated
 
     protected $responsive_selector; // Deprecated
     protected $responsive_slides;
@@ -41,7 +45,12 @@ abstract class ImageSlider {
     protected $prev_label = FALSE;
     protected $next_label = FALSE;
     protected $full_label = FALSE;
+    protected $extra_options = FALSE;
     protected $div_id;                         // If empty, a unique ID is generated.
+
+    // Any value equatin to true will produce a background over style markup
+    // a value of 2 will add the resize script so that it fills the page
+    protected $background_cover = FALSE;
 
     ////////////////////////////////////////////////////////////////////////////
 
@@ -50,9 +59,15 @@ abstract class ImageSlider {
     public function __construct($imgs)
     {
         if(class_exists('\\JFactory') or class_exists('JFactory'))
-            $this->jdoc =& \JFactory::getDocument();
+            $this->jdoc = \JFactory::getDocument();
         $this->imgs = $imgs;
         $this->buf = array();
+
+        if(isset($this->iosslider_js_uri)) {
+            $this->slider_js_uri = $this->iosslider_js_uri;
+            $this->slider_css_uri = $this->iosslider_css_uri;
+            $this->slider_type = 'iosslider';
+        }
     }
 
     protected $buf;             // Output buffer
@@ -67,22 +82,101 @@ abstract class ImageSlider {
 
     protected function addJS()
     {
-        // If not set, we assume the required iosSlider javascript is
+        switch ($this->slider_type) {
+        case 'Swiper':
+        case 'swiper':
+            return $this->addSwiperJS();
+
+        default:
+        case 'iosslider':
+            return $this->addIosSliderJS();
+        }
+    }
+
+    protected function addSwiperJS()
+    {
+        // If not set, we assume the required slider javascript is
         // already included elsewhere.
-        if(!empty($this->iosslider_js_uri))
-            $this->buf[] = '<script type="text/javascript" src="'.$this->iosslider_js_uri.'"></script>';
+        if(!empty($this->slider_js_uri))
+            $this->buf[] = '<script type="text/javascript" src="'.$this->slider_js_uri.'"></script>';
 
         $id = $this->getId();
         $navSlideSelector = '#'.$id.' .'.$this->thumbs_class.' .'.$this->thumb_class;
 
         $confOpts = array(
-            'snapToChildren:true',
-            'onSlideChange:change',
-            'onSlideComplete:change',
-            'onSliderLoaded:change',
-            'infiniteSlider:true',
-            'desktopClickDrag:true',
-            'autoSlide:true'
+            'snapToChildren'=>'true',
+            'desktopClickDrag'=>'true',
+            'snapSlideCenter'=>'true',
+            'loop'=>'true',
+            'autoplay'=>'5000',
+//            'autoplayDisableOnInteraction'=>'true',
+            'calculateHeight'=>'true',
+            'wrapperClass'=>'"slider"',
+            'slideClass'=>'"slide"',
+        );
+
+        if(!empty($this->extra_options)) {
+            $confOpts = array_merge($confOpts, $this->extra_options);
+        }
+
+        // Can't think of a quicker way to do this... can't use
+        // json_encode, as we're encoding complex stuff.
+        $confOptsBuf = array();
+        foreach ($confOpts as $key=>$val) {
+            $confOptsBuf[] = $key.':'.$val;
+        }
+
+        $confOpts = '{'.join(",", $confOptsBuf).'}';
+
+        $this->buf[] = '<script type="text/javascript">(function ($) {';
+        $this->buf[] = "
+  'use strict';
+  $('#$id').data('swiper-opts', $confOpts);
+  var swiper = $('#$id').swiper($confOpts);
+  $(function () {";
+
+        // 2 is used for "full" height swipers, not including header sections
+        if ( $this->background_cover === 2 )
+            $this->buf[] = "
+    jQuery(window).on('resize', function() {
+        var headerheight = 0;
+        if ( $('#header').length )
+            headerheight = $('#header').height();
+        else if ( $('header').length == 1 )
+            headerheight = $('header').height();
+        var browserheight = jQuery(window).height();
+        $('#{$id}_outer, #$id, #$id .slider, #$id .slide').height(browserheight-headerheight);
+    }).trigger('resize');";
+
+        $this->buf[] = "
+    $('#{$id}_prev').click(function () { return swiper.swipePrev(); });
+    $('#{$id}_next').click(function () { return swiper.swipeNext(); });
+  });
+";
+        $this->buf[] = "}(jQuery));\n</script>";
+    }
+
+
+    protected function addIosSliderJS()
+    {
+        // If not set, we assume the required slider javascript is
+        // already included elsewhere.
+        if(!empty($this->slider_js_uri))
+            $this->buf[] = '<script type="text/javascript" src="'.$this->slider_js_uri.'"></script>';
+
+        $id = $this->getId();
+        $navSlideSelector = '#'.$id.' .'.$this->thumbs_class.' .'.$this->thumb_class;
+
+        $confOpts = array(
+            'snapToChildren'=>'true',
+            'onSlideChange'=>'change',
+//            'onSlideComplete'=>'complete',
+            'onSliderLoaded'=>'change',
+            'onSliderResize'=>'change',
+            'infiniteSlider'=>'true',
+            'desktopClickDrag'=>'true',
+            'snapSlideCenter'=>'true',
+            'autoSlide'=>'true'
         );
 
         if(isset($this->responsive_selector)) {
@@ -94,21 +188,32 @@ abstract class ImageSlider {
         }
 
         if(!$this->responsive_container and !$this->responsive_slides) {
-            $confOpts[] = "responsiveSlides:false";
+            $confOpts["responsiveSlides"] = "false";
         }
         else {
-            $confOpts[] = "responsiveSlides:".($this->responsive_slides ? 'true':'false');
-            $confOpts[] = "responsiveSlideContainer:".($this->responsive_container ? 'true':'false');
+            $confOpts["responsiveSlides"] = ($this->responsive_slides ? 'true':'false');
+            $confOpts["responsiveSlideContainer"] = ($this->responsive_container ? 'true':'false');
         }
 
-        $confOpts[] = "navSlideSelector:$('$navSlideSelector')";
+        $confOpts["navSlideSelector"] = "$('$navSlideSelector')";
 
         if(FALSE !== $this->prev_label and FALSE !== $this->next_label) {
-            $confOpts[] = "navNextSelector:$('#${id}_next')";
-            $confOpts[] = "navPrevSelector:$('#${id}_prev')";
+            $confOpts["navNextSelector"] = "$('#${id}_next')";
+            $confOpts["navPrevSelector"] = "$('#${id}_prev')";
         }
 
-        $confOpts = '{'.join(",", $confOpts).'}';
+        if(!empty($this->extra_options)) {
+            $confOpts = array_merge($confOpts, $this->extra_options);
+        }
+
+        // Can't think of a quicker way to do this... can't use
+        // json_encode, as we're encoding complex stuff.
+        $confOptsBuf = array();
+        foreach ($confOpts as $key=>$val) {
+            $confOptsBuf[] = $key.':'.$val;
+        }
+
+        $confOpts = '{'.join(",", $confOptsBuf).'}';
 
         $this->buf[] = '<script type="text/javascript">';
         $this->buf[] = "
@@ -116,15 +221,20 @@ abstract class ImageSlider {
   'use strict';
   var obj = $('#$id');
   var change = function (a) {
-    $('.thumb',obj).removeClass('current');
-    $('.thumb:eq('+(a.currentSlideNumber-1)+')',obj).addClass('current');
-    $('.slide',obj).removeClass('current');
-    $(a.currentSlideObject).addClass('current');
+    var curThumb = $('.thumb:eq('+(a.currentSlideNumber-1)+')',obj);
+    var curSlide = $(a.currentSlideObject);
+
+    $('.thumb',obj).not(curThumb).removeClass('current');
+    curThumb.addClass('current');
+
+    $('.slide',obj).not(curSlide).removeClass('current');
+    curSlide.addClass('current');
   };
+  var complete = change;
   $(function () {
-    obj.iosSlider($confOpts).addClass('loaded');
+    obj.iosSlider($confOpts).addClass('loaded');;
     if($('html').hasClass('lt-ie9')) { // I H8 IE8
-       $('a.slide', obj).each(function () {
+       $('.slide > a, a.slide', obj).each(function () {
          var self = $(this);
          var href = self.prop('href');
          self.removeAttr('href')
@@ -155,11 +265,11 @@ abstract class ImageSlider {
 
     protected function addCSS()
     {
-        if(!empty($this->iosslider_css_uri))
+        if(!empty($this->slider_css_uri))
             if(!empty($this->jdoc))
-                $this->jdoc->addStyleSheet($this->iosslider_css_uri);
+                $this->jdoc->addStyleSheet($this->slider_css_uri);
             else
-                $this->buf[] = '<link rel="stylesheet" type="text/css" href="'.$this->iosslider_css_uri.'">';
+                $this->buf[] = '<link rel="stylesheet" type="text/css" href="'.$this->slider_css_uri.'">';
     }
 
     protected function addCustomTag($tag)
@@ -181,30 +291,38 @@ abstract class ImageSlider {
         if(is_null($overlayHTML) and is_null($clickURI))
             return array($this->imgElement($imgURI, $class, $alt));
 
-        // Otherwise, start with the image in an array
-        $slide = array($this->imgElement($imgURI, null, $alt));
+        // Otherwise, start with an empty array
+        $slide = array();
 
-        // If there's a URI, the wrapper is an <a>, else it's a <div>
+        // If there's a URI, use an <a> as the main slide wrapper. Else, a <div>
         if(!is_null($clickURI))
-            array_unshift($slide, '<a href="'.$clickURI.'"');
+            $slide[] = '<a href="'.$clickURI.'"';
         else
-            array_unshift($slide, '<div');
+            $slide[] = '<div';
 
-        // If there's a class (there should be!) then add it to the element
+        if ( $this->background_cover )
+            $slide[] = " style=\"background-image: url($imgURI);\"";
+
+        // If there's a class (there should be!) then add it to the
+        // wrapper and close the wrapper's opening tag.
         if(is_null($class))
-            $slide[0] .= '>';
+            $slide[] = '>';
         else
-            $slide[0] .= ' class="'.$class.'">';
+            $slide[] = ' class="'.$class.'">';
+
+        // Add the image
+        if ( !$this->background_cover )
+            $slide[] = $this->imgElement($imgURI, null, $alt);
 
         // If there's any HTML to overlay, add it
         if(!is_null($overlayHTML))
             $slide[] = '  '.$overlayHTML;
 
         // And close the wrapper
-        if(is_null($clickURI))
-            $slide[] = '</div>';
-        else
+        if(!is_null($clickURI))
             $slide[] = '</a>';
+        else
+            $slide[] = '</div>';
 
         // Return as an array, so it needs to be join()'ed or
         // array_merge()'d into the buffer.
@@ -303,7 +421,9 @@ abstract class ImageSlider {
             $actualCount = 1;
         }
 
-        $this->buf[] = '<div class="ImageSliderOuter '.$this->div_classes.'">';
+        $id = $this->getId();
+
+        $this->buf[] = '<div id="'.$id.'-outer" class="ImageSliderOuter '.$this->div_classes.'">';
 
         // We only bother using a slider if there's more than one slide.
         if ($actualCount > 1) {
@@ -314,7 +434,7 @@ abstract class ImageSlider {
             else
                 $thumbs_classes .= ' largeThumbs';
 
-            $this->buf[] = '<div id="'.$this->getId().'" class="ImageSlider ImageSliderSlideshow slideshow '.$this->div_classes.' startekSlider">';
+            $this->buf[] = '<div id="'.$id.'" class="ImageSlider ImageSliderSlideshow slideshow '.$this->div_classes.' startekSlider">';
             $this->buf[] = '<div class="'.$this->slider_class.'">';
             $this->buf   = array_merge($this->buf, $slides);
             $this->buf[] = '</div>'; // end slider
@@ -327,26 +447,38 @@ abstract class ImageSlider {
             $this->buf[] = '</div>'; // end Slideshow
             $this->addJS();
 
-            if(FALSE !== $this->prev_label and FALSE !== $this->next_label) {
-                $this->buf[] = '<a id="'.$this->getId().'_prev" href="#" class="ImageSliderPrev ImageSliderPrevNext">'.$this->prev_label.'</a>';
-                $this->buf[] = '<a id="'.$this->getId().'_next" href="#" class="ImageSliderNext ImageSliderPrevNext">'.$this->next_label.'</a>';
-            }
+            if((FALSE !== $this->prev_label and FALSE !== $this->next_label) or (FALSE !== $this->full_label)) {
+                $this->buf[] = '<div class="ImageSliderControls">';
+                $this->buf[] = '<span>';
 
-            if(FALSE !== $this->full_label) {
-                $this->buf[] = '<a id="'.$this->getId().'_full" href="#" class="ImageSliderFull">'.$this->full_label.'</a>';
+                if(FALSE !== $this->prev_label and FALSE !== $this->next_label) {
+                    $this->buf[] = '<a id="'.$this->getId().'_prev" href="javascript:void(0)" class="ImageSliderPrev ImageSliderPrevNext"><span>'.$this->prev_label.'</span></a>';
+                    $this->buf[] = '<a id="'.$this->getId().'_next" href="javascript:void(0)" class="ImageSliderNext ImageSliderPrevNext"><span>'.$this->next_label.'</span></a>';
+                }
+
+                if(FALSE !== $this->full_label) {
+                    $this->buf[] = '<a id="'.$this->getId().'_full" href="javascript:void(0)" class="ImageSliderFull"><span>'.$this->full_label.'</span></a>';
+                }
+
+                $this->buf[] = '</span>'; // end controls inner wrapper
+                $this->buf[] = '</div>'; // end controls wrapper
             }
 
             $this->buf[] = '</div>'; // end wrapper
         }
         else if($actualCount == 1) {
-            $this->buf[] = '<div id="'.$this->div_id.'" class="'.$this->div_classes.'">';
+            $this->buf[] = '<div id="'.$this->getId().'" class="ImageSlider ImageSliderSlideshow slideshow '.$this->div_classes.' startekSlider">';
             $this->buf[] = '<div class="'.$this->slider_class.'">';
             $this->buf   = array_merge($this->buf, $slides);
             $this->buf[] = '</div>'; // end slider
             $this->buf[] = '</div>'; // end Slideshow
 
             if(FALSE !== $this->full_label) {
-                $this->buf[] = '<a id="'.$this->getId().'_full" href="#" class="ImageSliderFull">'.$this->full_label.'</a>';
+                $this->buf[] = '<div class="ImageSliderControls">';
+                $this->buf[] = '<span>';
+                $this->buf[] = '<a id="'.$this->getId().'_full" href="javascript:void(0)" class="ImageSliderFull"><span>'.$this->full_label.'</span></a>';
+                $this->buf[] = '</span>'; // end controls inner wrapper
+                $this->buf[] = '</div>'; // end controls wrapper
             }
 
             $this->buf[] = '</div>'; // end wrapper
